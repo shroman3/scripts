@@ -2,13 +2,14 @@
 import os
 import sys
 from subprocess import check_output, Popen, STDOUT, PIPE, CalledProcessError
-from datetime import datetime, timedelta
+from datetime import datetime #, timedelta
 from time import sleep
 import csv
 import dateutil.parser
 import json
 import re
 import xml.etree.ElementTree
+# from fileinput import filename
 
 
 # list of functions:
@@ -58,176 +59,92 @@ class ParallelPlatform:
 
     def __init__(self):
         # define dirs
-        self.scdir = "/homes/sraid/scripts"
-        self.expdir = self.scdir + "/experiments"
-        # self.rec_obj_re = re.compile('.*recovery (\S*) objects')
-        self.servers = []
+        self.scdir = "/sraid"
+        self.clientdir = self.scdir + "/client"
+        self.serverdir = self.scdir + "/server"
+        self.servers = {}
+        self.experiments = []
         os.chdir(self.scdir)
         # choose servers, must be ordered
         self.parse_servers()
-#         with open("servers.txt", "r") as f:
-#             for line in f.readlines():
-#                 self.servers.append(line.strip())
-#         self.partitions = ["sda3", "sdb2"]
-# TODO: Check what to get as arguments
-        if len(sys.argv) < 6:
+        if (len(sys.argv) > 3) or (len(sys.argv) < 2):
             print "Please call the parallel platform in the following manner:"
-            print "./parallel_platform.py <experiment> <k> <r> <z> <osd>"
+            print "./parallel_platform.py experiment_filename"
             exit(0)
         # parse arguments:
         self.parse_arguments()
+        self.parse_experiments()
 
+    def parse_experiments(self):
+        with open(self.experiment, "r") as f:
+            for line in f.readlines():
+                line = line.strip()
+                self.experiments.append(line)
+                print(line)
+                
     def parse_servers(self):
-        e = xml.etree.ElementTree.parse('config.xml').getroot()
-        for atype in e.findall('server'):
-            server = atype.get('host')
-            print(server)
-            self.servers.append(server)
+        e = xml.etree.ElementTree.parse('/sraid/client/config.xml').getroot()
+        for conn in e.findall('connections'):
+            for atype in conn.findall('server'):
+                server = atype.get('host')
+                self.servers[server] = self.servers.get(server, 0) + 1
 
     def parse_arguments(self):
         self.experiment = sys.argv[1]
-        if "fail" in self.experiment:
-            print "Remember that we assume the pool is correctly set and " \
-                + "objects were written to it"
-        self.k = int(sys.argv[2])
-        self.r = int(sys.argv[3])
-        self.z = int(sys.argv[4])
-        # self.osd_per_node will be used when parsing the measurement to an excel.
-        self.osd_per_node = int(sys.argv[5])
-#         self.s = int(sys.argv[5])
-#         self.perm = int(sys.argv[6])
-#         self.cobj = int(sys.argv[8])
-#         self.obj_size = int(sys.argv[9])
-#         self.code = sys.argv[10]
-#         self.analyze = sys.argv[11]
-#         if self.code != "zz" and self.code != "rs":
-#             print "Illegal code name. Please choose zz/rs..."
-#             exit(0)
-        self.pool_name = "zzpool" if self.code == "zz" else "rspool"
-        # self.analyze_file = None if len(sys.argv) < 12 else sys.argv[11]
-        # if self.analyze_file is not None:
-        #     tmp = self.analyze_file.split(".")
-        #     self.end_analyze_file = tmp[0] + "_end." + tmp[1]
-        self.align = 4096 # element size
-        self.w = 8 # if not specified else
-        serv_num = len(self.servers)
-        # should be 19 in regular configuration
-        self.max_num_osds = int(serv_num) * 2 - 1
-        self.nodes_needed = self.k + self.r
-        # if we need (k+r) more than the number of OSDs
-        if self.nodes_needed > self.max_num_osds \
-                or (self.osd_per_node == 1 \
-                        and self.nodes_needed > self.max_num_osds / 2):
-            print "num nodes needed bigger than num osds"
-            # TODO: think later what to do in that case, i.e. stop measurements etc
-            assert(0)
-        self.pg_num = 512 # seems fine for our experiment sizes
-        self.experiment_start = None
-        self.poll_failed_time = 2 # num seconds to sleep between calls to ceph health on failure
-
+        self.delete_data = False
+        if (len(sys.argv) == 3):
+            self.delete_data = (sys.argv[2].lower() != 'false')
 
     def conduct_experiment(self):
-        if self.experiment.endswith("encode"):
-            self.encode_experiment()
-        elif self.experiment.startswith("largefail"):
-            self.fail_experiment()        
-
-
-    def encode_experiment(self):
-        # erase + prepare pool using our erasure_commands script:
-        os.chdir(self.scdir)
-        # Create pool:
+        os.chdir(self.clientdir)
         try:
-            p_ec = call(["sudo", "./erasure_commands.py"]
-                    + list(map(str, (self.pool_name, self.k, self.r, self.v,
-                    self.s, self.perm, self.w, self.align,
-                    self.obj_size, self.pg_num))), "ec: ")
-        except Exception, e:
-            print e
-        # reweight nodes properly
-        self.prepare_nodes()
-        # wait for cluster to rebalance
-        self.poll_until_health_ok()
-
-        os.chdir(self.expdir)
-        try:
+            self.experiment_start = []
             # declare experiment has begun
-            self.experiment_start = datetime.utcnow()
-            print "experiment started at:",
-            print self.experiment_start
             # self.experiment could be encode or encode2
-            
-            p_ex = call(["sudo", "./runner/bin/experiment_runner"]
-                + list(map(str, (self.pool_name, self.experiment, self.k, self.r,
-                            self.v, self.s, self.cobj, self.obj_size))))
+            for exp in self.experiments:
+                experiment_start = datetime.utcnow()
+                print exp + " experiment started at:",
+                print experiment_start
+                self.experiment_start.append(experiment_start)
+                p_ex = call(["java -jar Xmx1g Xms1g client.jar", exp])
+                sleep(3);
         except Exception, e:
             print e
 
-    def fail_experiment(self):
-        # in case the size of the cluster is num_osds
-        # reweight all nodes to 1:
-        self.prepare_nodes()
-        
-        if self.analyze == "yes":
-            self.analyze_pgs(False)
-        # unmount all partitions and remount to remove cache
-        self.parallel_unmount()
-        
-        # notice that in large fail at the second we fail the OSD
-        # PGs will be remapped and recovery initiates.
-        self.prepare_failure()
-
-        # store recovered objects before crush has updated
-        #self.store_recovered_objs(True)
-
-        # declare experiment has begun
-        self.experiment_start = datetime.utcnow()
-        print "started experiment at " + str(self.experiment_start)
-        #print check_output("sudo ceph osd crush remove osd."
-        #        + self.experiment[-1], shell=True)
-        
-        #print check_output("sudo ceph osd unset noout", shell=True)
-
-        # store recovered objects after crush function has changed
-        #self.store_recovered_objs(True)
-
-        self.poll_until_health_ok() 
-        #sleeptime = (timedelta(seconds=1800)-(datetime.utcnow() \
-        #            - self.experiment_start)).total_seconds()
-        #print ("SLEEPTIME: " + str(sleeptime))
-        #if sleeptime > 0:
-        #    sleep(sleeptime)
-
-
-    def prepare_nodes(self):
-        # osds of number self.max_num_osds and above should be reweighted to 0.
-        # maybe get osds using ceph osd tree parsing it...
-        # for now assume that there are 8 (or 20) OSDs:
-
-        # remove osd.i in the following manner:
-        # increase nodes_needed by 1 and then reweight osd 0 to 0 (or skip its reweight)
-        # now we want to treat the all_osds case:
-        nodes_needed = self.max_num_osds if self.osd_per_node == 2 \
-                                else self.max_num_osds // 2
-
-        # Reweight to 1 according to the bus principle or regular?
-        # Bus principle:
-        nodes_order = [1,3,5,7,9,11,13,15,17,19,2,4,6,8,10,12,14,16,18,0]
-        # filter away too large osds
-        nodes_order = [x for x in nodes_order if x < len(self.servers)*2]
-        for i in range(0, nodes_needed):
-            call(["sudo", "ceph", "osd", "crush", "reweight",
-                    "osd."+str(nodes_order[i]), "1"], output=False)
-        # if we have 9 servers we wouldn't like to change weight of osd 18,19
-        for i in range(nodes_needed, len(nodes_order)):
-            call(["sudo", "ceph", "osd", "crush", "reweight",
-                    "osd."+str(nodes_order[i]), "0"], output=False)
-
-        # we caused remapping so we must wait until ceph stabilizes
-        self.poll_until_health_ok()
-        
-        # mark nodes as down
-
+#     def fail_experiment(self):
+#         # in case the size of the cluster is num_osds
+#         # reweight all nodes to 1:
+#         self.prepare_nodes()
+#         
+#         if self.analyze == "yes":
+#             self.analyze_pgs(False)
+#         # unmount all partitions and remount to remove cache
+#         self.parallel_unmount()
+#         
+#         # notice that in large fail at the second we fail the OSD
+#         # PGs will be remapped and recovery initiates.
+#         self.prepare_failure()
+# 
+#         # store recovered objects before crush has updated
+#         # self.store_recovered_objs(True)
+# 
+#         # declare experiment has begun
+#         self.experiment_start = datetime.utcnow()
+#         print "started experiment at " + str(self.experiment_start)
+#         # print check_output("sudo ceph osd crush remove osd."
+#         #        + self.experiment[-1], shell=True)
+#         
+#         # print check_output("sudo ceph osd unset noout", shell=True)
+# 
+#         # store recovered objects after crush function has changed
+#         # self.store_recovered_objs(True)
+# 
+#         self.poll_until_health_ok() 
+#         # sleeptime = (timedelta(seconds=1800)-(datetime.utcnow() \
+#         #            - self.experiment_start)).total_seconds()
+#         # print ("SLEEPTIME: " + str(sleeptime))
+#         # if sleeptime > 0:
+#         #    sleep(sleeptime)
 
     def analyze_pgs(self, after_experiment):
         """ Creates analyze_file(.txt) and analyze_file_v(.txt) with details
@@ -237,7 +154,7 @@ class ParallelPlatform:
         after_str = "_end" if after_experiment else ""
         analyze_file = "_".join([str(self.obj_size >> 20), str(self.k),
                 str(self.r), str(self.v), str(self.s), str(self.perm),
-                str((self.obj_size*self.cobj) >> 30)]) + after_str + ".txt"
+                str((self.obj_size * self.cobj) >> 30)]) + after_str + ".txt"
         # acting_pgs = check_output("sudo ceph pg dump pgs | awk '{print $2 $16}'"
         #         + " | tail -n+2", shell=True)
         acting_pgs = check_output("sudo ceph pg dump pgs | cut -f2,16 | "
@@ -262,25 +179,25 @@ class ParallelPlatform:
         check_output("sudo ceph osd set noout", shell=True)
         sleep(20)
 
-        try: # should work for everyone except the down osd
+        try:  # should work for everyone except the down osd
             # give client access to servers list and copy parallel_unmount.sh
             # script
-            check_output("parallel-scp -l cephuser "
+            check_output("parallel-scp -l shroman "
                     + "-h /homes/cephadmin/scripts/servers.txt "
                     + "/homes/cephadmin/scripts/servers.txt /tmp", shell=True)
-            check_output("parallel-scp -l cephuser "
+            check_output("parallel-scp -l shroman "
                     + "-h /homes/cephadmin/scripts/servers.txt "
                     + "/homes/cephadmin/scripts/experiments/"
                     + "parallel_unmount.sh /tmp", shell=True)
             # execute parallel_unmount.sh script to unmount and remount
             # partitions on all servers at once
             check_output("parallel-ssh -h /homes/cephadmin/scripts/servers.txt"
-                    + " -l cephuser 'sudo chmod +x /tmp/parallel_unmount.sh; "
+                    + " -l shroman 'sudo chmod +x /tmp/parallel_unmount.sh; "
                     + "/tmp/parallel_unmount.sh'"
                     , shell=True)
             # remove added files
             check_output("parallel-ssh -h /homes/cephadmin/scripts/servers.txt"
-                    + " -l cephuser "
+                    + " -l shroman "
                     + "'sudo rm /tmp/servers.txt /tmp/parallel_unmount.sh'"
                     , shell=True)
         except Exception, e:
@@ -290,48 +207,48 @@ class ParallelPlatform:
         self.poll_until_health_ok()
 
 
-    """ This function crashes 1 osd in case of a small cluster failure
-    so that we can retrieve it. """
-    def prepare_failure(self):
-        # experiment named 'smallfail%' where % is the OSD to fail
-        failed_osd = int(self.experiment[-1])
-        (serv, part) = self.get_server_partition(failed_osd)
-        print "server: " + serv + " and partition: " + part
-        os.chdir(self.scdir);
-        # old way of reinserting the same OSD
-        """osd_fsid = check_output("sudo ceph-osd -i 1 --get-osd-fsid", shell=True)
-        osd_fsid = osd_fsid.replace("\n", "")
-        print osd_fsid
-        print check_output("sudo ceph osd set noout;", shell=True)
-        print check_output("sudo stop ceph-osd id=1;", shell=True)
-        print check_output("sudo umount /dev/sdb2;", shell=True)
-        print check_output("sudo mkfs.xfs -f /dev/sdb2;", shell=True)
-        # check if /var/lib/ceph/osd/ceph-1 is empty
-        print check_output("sudo rm -r /var/lib/ceph/osd/ceph-1;", shell=True)
-        print check_output("sudo mkdir /var/lib/ceph/osd/ceph-1;", shell=True)
-        print check_output("sudo mount /dev/sdb2 /var/lib/ceph/osd/ceph-1;",
-                shell=True)
-        print check_output("sudo chown -R ceph:ceph /var/lib/ceph/osd/ceph-1;",
-                shell=True)
-        print check_output("sudo ceph-osd -d --setuser ceph -i 1 "
-                + "--osd-data /var/lib/ceph/osd/ceph-1 --mkfs --mkkey "
-                + "-c /homes/cephadmin/my-cluster/ceph.conf "
-                + "--osd-uuid " + osd_fsid + ";", shell=True)
-        print check_output("sudo ceph auth del osd.1;", shell=True)
-        print check_output("sudo ceph auth add osd.1 osd 'allow *' "
-                + "mon 'allow rwx' -i /var/lib/ceph/osd/ceph-1/keyring;",
-                shell=True)
-        print check_output("sudo ceph osd unset noout;", shell=True)
-        print check_output("sudo start ceph-osd id=1;", shell=True)"""
-        print check_output(["sudo", "stop", "ceph-osd", "id=1"])
-        print check_output(["sudo", "ceph", "osd", "lost", "1", "--yes-i-really-mean-it"])
-        print check_output(["sudo", "ceph", "osd", "out", "1"])
-        """try:
-            print check_output("./kill-osd.sh " 
-                    + " ".join((str(failed_osd), serv, part))
-                    , shell=True)
-        except Exception, e:
-            print e"""
+#     """ This function crashes 1 osd in case of a small cluster failure
+#     so that we can retrieve it. """
+#     def prepare_failure(self):
+#         # experiment named 'smallfail%' where % is the OSD to fail
+#         failed_osd = int(self.experiment[-1])
+#         (serv, part) = self.get_server_partition(failed_osd)
+#         print "server: " + serv + " and partition: " + part
+#         os.chdir(self.scdir);
+#         # old way of reinserting the same OSD
+#         """osd_fsid = check_output("sudo ceph-osd -i 1 --get-osd-fsid", shell=True)
+#         osd_fsid = osd_fsid.replace("\n", "")
+#         print osd_fsid
+#         print check_output("sudo ceph osd set noout;", shell=True)
+#         print check_output("sudo stop ceph-osd id=1;", shell=True)
+#         print check_output("sudo umount /dev/sdb2;", shell=True)
+#         print check_output("sudo mkfs.xfs -f /dev/sdb2;", shell=True)
+#         # check if /var/lib/ceph/osd/ceph-1 is empty
+#         print check_output("sudo rm -r /var/lib/ceph/osd/ceph-1;", shell=True)
+#         print check_output("sudo mkdir /var/lib/ceph/osd/ceph-1;", shell=True)
+#         print check_output("sudo mount /dev/sdb2 /var/lib/ceph/osd/ceph-1;",
+#                 shell=True)
+#         print check_output("sudo chown -R ceph:ceph /var/lib/ceph/osd/ceph-1;",
+#                 shell=True)
+#         print check_output("sudo ceph-osd -d --setuser ceph -i 1 "
+#                 + "--osd-data /var/lib/ceph/osd/ceph-1 --mkfs --mkkey "
+#                 + "-c /homes/cephadmin/my-cluster/ceph.conf "
+#                 + "--osd-uuid " + osd_fsid + ";", shell=True)
+#         print check_output("sudo ceph auth del osd.1;", shell=True)
+#         print check_output("sudo ceph auth add osd.1 osd 'allow *' "
+#                 + "mon 'allow rwx' -i /var/lib/ceph/osd/ceph-1/keyring;",
+#                 shell=True)
+#         print check_output("sudo ceph osd unset noout;", shell=True)
+#         print check_output("sudo start ceph-osd id=1;", shell=True)"""
+#         print check_output(["sudo", "stop", "ceph-osd", "id=1"])
+#         print check_output(["sudo", "ceph", "osd", "lost", "1", "--yes-i-really-mean-it"])
+#         print check_output(["sudo", "ceph", "osd", "out", "1"])
+#         """try:
+#             print check_output("./kill-osd.sh " 
+#                     + " ".join((str(failed_osd), serv, part))
+#                     , shell=True)
+#         except Exception, e:
+#             print e"""
  
 
     """ iterate over servers and partitions (ORDERED please), and get
@@ -356,7 +273,7 @@ class ParallelPlatform:
             while True:
                 # get ceph health
                 recovered_str = self.store_recovered_objs_aux()
-                sleep(float(self.poll_failed_time)/2)
+                sleep(float(self.poll_failed_time) / 2)
                 # if it mentions recovered_objects compare to max we have seen
                 if recovered_str is not None:
                     recovered_objs = int(recovered_str.split("/")[0])
@@ -374,9 +291,9 @@ class ParallelPlatform:
         else:
             while max_str == None:
                 max_str = self.store_recovered_objs_aux()
-                sleep(float(self.poll_failed_time)/2)
+                sleep(float(self.poll_failed_time) / 2)
 
-        confname = "_".join(map(str,[self.k, self.r, self.v, self.s, self.perm]))
+        confname = "_".join(map(str, [self.k, self.r, self.v, self.s, self.perm]))
         f = open("pg_analyzer/recovered_objs.txt", 'a')
         f.write(confname + ": " + max_str + "\n")
         f.close()
@@ -395,20 +312,20 @@ class ParallelPlatform:
     def recover_osd(self):
         failed_osd = int(self.experiment[-1])
         (serv, part) = self.get_server_partition(failed_osd)
-        """check_output("ssh cephuser@" + serv + " 'sudo mkdir "
+        """check_output("ssh shroman@" + serv + " 'sudo mkdir "
                 + "/var/lib/ceph/osd/ceph-" + str(failed_osd) + "'", shell=True)
-        check_output("ssh cephuser@" + serv +
-                " 'sudo chown cephuser:dslusers /var/lib/ceph/osd/ceph-"
+        check_output("ssh shroman@" + serv +
+                " 'sudo chown shroman:dslusers /var/lib/ceph/osd/ceph-"
                 + str(failed_osd) + "'", shell=True)
 
         os.chdir("/homes/cephadmin/my-cluster")
         print "Preparing 'osd." + str(failed_osd) + "'..."
-        call(("ceph-deploy --username cephuser osd prepare " + serv 
+        call(("ceph-deploy --username shroman osd prepare " + serv 
                     + ":" + part).split(" "))
         
 
         print "Activating 'osd." + str(failed_osd) + "'..."
-        call(("ceph-deploy --username cephuser osd activate " + serv
+        call(("ceph-deploy --username shroman osd activate " + serv
                     + ":" + part).split(" "))
         # reweight osd to 1:
         call(["sudo", "ceph", "osd", "crush", "reweight", "osd."
@@ -417,42 +334,24 @@ class ParallelPlatform:
         print check_output("sudo start ceph-osd id=1", shell=True)
         # TODO: maybe start measurements before activate?
 
-
-    def poll_until_health_ok(self):
-        while True:
-            try:
-                ret = check_output(["sudo", "ceph", "health"])
-                print ret
-                failed = [int(s) for s in ret.split() if s.isdigit()]
-                print "failed: " + str(failed)
-                if ret.startswith("HEALTH_OK") or \
-                        sum([0] + failed) <= 0:
-                    break
-            except Exception, e:
-                print e
-            sleep(self.poll_failed_time)
-
-    
-
     def execute(self):
-        print "executing",
-
-        # print args
-        args = ""
-        for arg in sys.argv:
-            args += arg + " "
-        print args
+        print "executing: " + self.experiment + "\n"
+        
+        experiments = ""
+        for arg in self.experiments :
+            experiments += arg + "\n"
+        print experiments
 
         self.experiment_get_ready()
 
         # start measurements...
         print "starting timer"
         timestart = datetime.utcnow()
-        for serv in self.servers:
+        for serv, count in self.servers.iteritems():
             try:
                 print "running stat_parser.py on " + serv
-                stat_parser = Popen("ssh cephuser@" + serv
-                        + " '/homes/cephuser/exp/stat_parser.py "
+                stat_parser = Popen("sshpass -f p.txt ssh " + serv
+                        + " '/sraid/server/stat_parser.py "
                         + timestart.isoformat() + " 2>&1 &'",
                         shell=True)
             except Exception, e:
@@ -467,7 +366,7 @@ class ParallelPlatform:
         sleep(3)
         print "kill measurements by 'touch done'"
         check_output("parallel-ssh -h /homes/cephadmin/scripts/servers.txt "
-                + "-l cephuser -i 'touch /homes/cephuser/exp/done'", shell=True)
+                + "-l shroman -i 'touch /homes/shroman/exp/done'", shell=True)
       
         # let clients finish
         print "sleep for 3 seconds for clients to finish"
@@ -481,46 +380,51 @@ class ParallelPlatform:
         self.after_experiment()
         
     def experiment_get_ready(self):
-        # clean up
         try:
-            call(["rm", "stats.txt", "*.pyc"], output=False)
-        except Exception, e:
-            print e
-              
-        print "copying script and dependencies:"
-        os.chdir(self.expdir)
-        try:
-            print check_output("parallel-ssh -h ../servers.txt -l cephuser -i "
-                + "'sudo rm -r /homes/cephuser/exp'", shell=True)
-        except Exception, e:
-            print e
-        try:
-            print check_output("parallel-ssh -h ../servers.txt -l cephuser -i "
-                + "'mkdir /homes/cephuser/exp'", shell=True)
-        except Exception, e:
-            print e
-        try:
-            print check_output("parallel-scp -r -l cephuser -h ../servers.txt "
-                + self.expdir + "/* /homes/cephuser/exp", shell=True)
+            call(["rm", "/sraid/server/stats.txt"], output=False)
         except Exception, e:
             print e
 
-        # if encode, don't waste time waiting for recovery
-        if self.experiment.endswith("largefail"):
-            # TODO: scp parallel_unmount.sh to secondaries!
-            self.poll_until_health_ok()
+        os.chdir(self.execdir)
+
+        # clean up
+        if self.delete_data :
+            print "deleting data:"
+            try:
+                print check_output("sshpass -f p.txt parallel-ssh -A -h ../servers.txt "
+                    + "'sudo -S rm -r /sraid/server/' < p.txt", shell=True)
+            except Exception, e:
+                print e
+        else:
+            print "deleting jar and stats:"
+            try:
+                print check_output("sshpass -f p.txt parallel-ssh -A -h ../servers.txt "
+                    + "'sudo -S rm /sraid/server/stats.txt' < p.txt", shell=True)
+            except Exception, e:
+                print e
+            try:
+                print check_output("sshpass -f p.txt parallel-ssh -A -h ../servers.txt "
+                    + "'sudo -S rm /sraid/server/server.jar' < p.txt", shell=True)
+            except Exception, e:
+                print e
+
+        try:
+            print check_output("sshpass -f p.txt parallel-scp -A -h ../servers.txt "
+                + "../server/* /sraid/server < p.txt", shell=True)
+        except Exception, e:
+            print e
 
     def copy_results_to_master(self):
         print "copy stats to this folder"
         os.chdir(self.expdir)
         for serv in self.servers:
-            check_output("scp cephuser@" + serv + ":/homes/cephuser/exp/stats.txt" + " ./"
+            check_output("scp shroman@" + serv + ":/homes/shroman/exp/stats.txt" + " ./"
                     + serv + ".txt", shell=True)
         # cleaning up clients
         print "clean client files"
         try:
             check_output("parallel-ssh -h /homes/cephadmin/scripts/servers.txt "
-                    + "-l cephuser -i 'rm -r /homes/cephuser/exp 2>/dev/null'"
+                    + "-l shroman -i 'rm -r /homes/shroman/exp 2>/dev/null'"
                     , shell=True)
         except Exception, e:
             print e
@@ -536,7 +440,7 @@ class ParallelPlatform:
                 'num_objects', 'obj_size', 'measurement', 'value'])
         
         for serv in self.servers:
-            with open(serv+".txt", "r") as f:
+            with open(serv + ".txt", "r") as f:
                 data = json.load(f)
                 for timerow in data:
                     # time, {io:{sdb2,sda3}, net:[rcv,trnsmt,localrcv,localtrnsmt],
@@ -560,9 +464,9 @@ class ParallelPlatform:
                                 timerow[1]["io"]["sda3"][0], t, serv)
                         self.write_measurement_row(csvwriter, "io_p1wB",
                                 timerow[1]["io"]["sda3"][1], t, serv)
-                    self.write_measurement_row(csvwriter, "io_p"+str(self.osd_per_node)+"rB",
+                    self.write_measurement_row(csvwriter, "io_p" + str(self.osd_per_node) + "rB",
                             timerow[1]["io"]["sdb2"][0], t, serv)
-                    self.write_measurement_row(csvwriter, "io_p"+str(self.osd_per_node)+"wB",
+                    self.write_measurement_row(csvwriter, "io_p" + str(self.osd_per_node) + "wB",
                             timerow[1]["io"]["sdb2"][1], t, serv)
                     # write network measurements
                     self.write_measurement_row(csvwriter, "net_rcvB",
@@ -587,7 +491,7 @@ class ParallelPlatform:
     in io there are 2 partitions one for each OSD so each call is for a partition.
     """
     def write_measurement_row(self, csvwriter, measurement, value, time, server):
-        printed_time = (time-self.experiment_start).total_seconds()
+        printed_time = (time - self.experiment_start).total_seconds()
 
         osdnum = self.servers.index(server) * self.osd_per_node
         if int(self.osd_per_node) == 2 and measurement.startswith("io_p2"):
@@ -605,7 +509,7 @@ class ParallelPlatform:
             csvrow2[5] = osdnum + 1
             csvwriter.writerow(csvrow)
             csvwriter.writerow(csvrow2)
-        else: # all other cases, 1 entry per call
+        else:  # all other cases, 1 entry per call
             csvwriter.writerow(csvrow)
 
     """
@@ -619,14 +523,14 @@ class ParallelPlatform:
             # unmount and remount
             (serv, partition) = self.get_server_partition(idx)
             try:
-                check_output("ssh cephuser@" + serv + " 'sudo stop ceph-osd id="
+                check_output("ssh shroman@" + serv + " 'sudo stop ceph-osd id="
                         + str(idx) + "'", shell=True)
-                check_output("ssh cephuser@" + serv + " 'sudo umount /dev/"
+                check_output("ssh shroman@" + serv + " 'sudo umount /dev/"
                         + partition + "'", shell=True)
-                check_output("ssh cephuser@" + serv + " 'sudo mount -t xfs -o "
+                check_output("ssh shroman@" + serv + " 'sudo mount -t xfs -o "
                         + "rw,noatime,inode64 /dev/" + partition
                         + " /var/lib/ceph/osd/ceph-" + str(idx) + "'", shell=True)
-                check_output("ssh cephuser@" + serv + " 'sudo start ceph-osd id="
+                check_output("ssh shroman@" + serv + " 'sudo start ceph-osd id="
                         + str(idx) + "'", shell=True)
             except Exception, e:
                 print e
@@ -639,9 +543,9 @@ class ParallelPlatform:
                  self.analyze_pgs(True)
 
             failed_osd = self.experiment[-1]
-            #call(["/homes/cephadmin/scripts/repair.py", failed_osd, "2"])
+            # call(["/homes/cephadmin/scripts/repair.py", failed_osd, "2"])
             self.recover_osd()
-            #self.poll_until_health_ok()
+            # self.poll_until_health_ok()
         elif self.experiment.endswith("encode"):
             pass
     
