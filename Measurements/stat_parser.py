@@ -6,12 +6,14 @@ from procnetdev import ProcNetDev
 from experiment_util import ExperimentUtil
 import json
 import os.path
+from os import chdir
 import dateutil.parser # use dateutil.parser.parse(isotime) to get datetime obj
 import sys
 from subprocess import check_output
 
 # main 
 def main():
+  chdir("/sraid/server/")
   if len(sys.argv) < 2:
     timestart = datetime.utcnow()
     # print "Provide start time..."
@@ -29,7 +31,7 @@ def main():
   # (timestamp, dict("io": {}, "net": {}, "cpu": {}))
   # io dict: "sdb2": [rkB/s, wkB/s], "sda3": [rkB/s, wkB/s] (positions 5,6 in
   #   splitted list)
-  # net dict: "lo": [rB/s, tB/s], "em1": [rB/s, tB/s]
+  # net dict: "lo": [rB/s, tB/s], "eno1": [rB/s, tB/s]
   # cpu: total %util
   gathered_data = list()
  

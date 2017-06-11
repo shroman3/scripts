@@ -102,7 +102,7 @@ class ExperimentUtil:
  
   def handle_cpustat(self, data):
     # add "all" argument to get data of all cpus
-    os.chdir("/homes/cephuser/exp")
+    os.chdir("/sraid/server")
     cputot = check_output("sudo ./cpu_measure.sh", shell=True)
     # cpu_desc.write(strtimenow + "$" + ", ".join(map(str,parse_cpu(cputot)))
     # + "\n")
@@ -112,10 +112,10 @@ class ExperimentUtil:
 
 
   def handle_netstat(self, net_inst, data):
-    # use /proc/net/dev, lo and em1 are the used interfaces
+    # use /proc/net/dev, lo and eno1 are the used interfaces
     net_inst.update()
-    diffdata = (int(net_inst['em1']['receive']['bytes']),
-            int(net_inst['em1']['transmit']['bytes']),
+    diffdata = (int(net_inst['eno1']['receive']['bytes']),
+            int(net_inst['eno1']['transmit']['bytes']),
             int(net_inst['lo']['receive']['bytes']),
             int(net_inst['lo']['transmit']['bytes']))
     if len(self.prev_net_diffdata) > 0:
