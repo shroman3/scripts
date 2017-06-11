@@ -152,11 +152,9 @@ class ParallelPlatform:
                 print "Reading input file before writing it"
                 with open("0", mode='rb') as file:
                     fileContent = file.read()
-            self.experiment_time = datetime.utcnow()
+            self.experiment_start = datetime.utcnow()
             print self.experiment + " experiment started at:",
-            print self.experiment_time
-            print check_output("pwd", shell=True)
-#             p_ex = call(["java -jar client.jar", self.experiment])
+            print self.experiment_start
             check_output("java -jar client.jar " + self.experiment, shell=True)
         except Exception, e:
             print "FAILED"
@@ -244,17 +242,19 @@ class ParallelPlatform:
 
         # parse experiment results
         self.parse_results()
+        self.parse_logs()  
+
         
     def copy_results_to_master(self):
         os.chdir(self.scriptsdir)
         print "copy stats to results folder"
         for serv in self.servers:
-            run_command("sshpass -f p.txt scp " + serv + ":/sraid/server/stats.txt ../results/stats_" + serv + ".txt < p.txt")
-            run_command("sshpass -f p.txt scp " + serv + ":/sraid/server/logs/client_connection.log ../results/log1_" + serv + ".txt < p.txt")
-            run_command("sshpass -f p.txt scp " + serv + ":/sraid2/server/logs/client_connection.log ../results/log2_" + serv + ".txt < p.txt")
+            run_command("sshpass -f p.txt scp " + serv + ":/sraid/server/stats.txt ../results/" + serv + ".stat < p.txt")
+            run_command("sshpass -f p.txt scp " + serv + ":/sraid/server/logs/client_connection.log ../results/log1_" + serv + ".log < p.txt")
+            run_command("sshpass -f p.txt scp " + serv + ":/sraid2/server/logs/client_connection.log ../results/log2_" + serv + ".log < p.txt")
             
         run_command("cp /sraid/client/logs/* ../results/");
-        run_command("cp /sraid/server/stats.txt ../results/stats_client.txt");
+        run_command("cp /sraid/server/stats.txt ../results/client.stat");
 
     def parse_results(self):
         print "parsing results..."
@@ -263,8 +263,11 @@ class ParallelPlatform:
         csvwriter = csv.writer(output)
         csvwriter.writerow(['timestamp', 'inttime', 'experiment', 'machine', 'measurement', 'value'])
         
-        for serv in self.servers:
-            with open("stats_" + serv + ".txt", "r") as f:
+        files = [f for f in os.listdir('.') if (os.path.isfile(f) and f.endswith(".stat"))]
+        for file in files:
+            print file
+            serv=file.split('.')[0]
+            with open(file, "r") as f:
                 data = json.load(f)
                 for timerow in data:
                     # parse time
@@ -308,7 +311,7 @@ class ParallelPlatform:
         
         # ['timestamp', 'inttime', 'experiment', 'machine', 'measurement', 'value'])
         csvrow = [str(printed_time), str(int(printed_time)),
-                  self.experiment, self.code, server, measurement, str(value)];
+                  self.experiment, server, measurement, str(value)];
         
         csvwriter.writerow(csvrow)
 #         if measurement.startswith("net"):
@@ -319,7 +322,37 @@ class ParallelPlatform:
 #             csvwriter.writerow(csvrow2)
 #         else:  # all other cases, 1 entry per call
 #             csvwriter.writerow(csvrow)
+    def parse_logs(self):
+        print "parsing logs..."
+        os.chdir(self.resultsdir)
+        output = open("logs.txt", "a")
+        csvwriter = csv.writer(output)
+        csvwriter.writerow(['experiment','log_type', 'time', 'tag', 'size'])
+        
+        files = [f for f in os.listdir('.') if (os.path.isfile(f) and f.endswith(".log"))]
+        for file in files:
+            print file
+            log_type=file.split('.')[0]
+            with open(file, "r") as f:
+                for line in f:
+                    try:
+                        split = line.split(' - ')
+                        timestamp=split[0]
+                        split = re.compile("\]*[\s\w,-:]*\[+").split(split[1])
+                        self.write_logs_row(csvwriter, log_type, split[2], split[3], split[4])
+                    except Exception, e:
+                        print e
+                       
+        output.close()
+#         print "removing logs and stats"
+#         run_command("rm *.log *.stat")
 
+    def write_logs_row(self, csvwriter, log_type, time, tag, size):
+        # ['experiment', 'log_type', 'time', 'tag', 'size'])
+        size = size.split(']')[0]
+        csvrow = [self.experiment, log_type, time, tag] + size.split(',');
+        csvrow.append(object)
+        csvwriter.writerow(csvrow)
 
 if __name__ == "__main__":
     p = ParallelPlatform()

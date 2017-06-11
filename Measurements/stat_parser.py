@@ -29,7 +29,7 @@ def main():
   
   # for each timestamp we add a pair to the list:
   # (timestamp, dict("io": {}, "net": {}, "cpu": {}))
-  # io dict: "sdb2": [rkB/s, wkB/s], "sda3": [rkB/s, wkB/s] (positions 5,6 in
+  # io dict: "sdb1": [rkB/s, wkB/s], "sda4": [rkB/s, wkB/s] (positions 5,6 in
   #   splitted list)
   # net dict: "lo": [rB/s, tB/s], "eno1": [rB/s, tB/s]
   # cpu: total %util

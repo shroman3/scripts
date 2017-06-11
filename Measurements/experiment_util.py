@@ -57,11 +57,11 @@ class ExperimentUtil:
   def parse_io(self, iostat):
     for line in iostat.splitlines():
       line = line.split()
-      if line[2] == "sda3":
+      if line[2] == "sda4":
         brd1 = str(int(line[5])*512)
         bwr1 = str(int(line[9])*512)
         #print bwr1
-      elif line[2] == "sdb2":
+      elif line[2] == "sdb1":
         brd2 = str(int(line[5])*512)
         bwr2 = str(int(line[9])*512)
         #print bwr2
@@ -85,7 +85,7 @@ class ExperimentUtil:
 
 
   def handle_iostat(self, data):
-    #iostat = check_output("iostat -dx device sda3 sdb2",
+    #iostat = check_output("iostat -dx device sda4 sdb1",
     #        shell=True)
     #iostat = filter(str.strip, iostat.splitlines())
     #iostat = map(str.split,iostat)
@@ -94,8 +94,8 @@ class ExperimentUtil:
     data['io'] = dict()
     iolist = self.parse_io(iostat)
     if len(iolist) > 0:
-      data['io']['sda3'] = [iolist[0], iolist[1]]
-      data['io']['sdb2'] = [iolist[2], iolist[3]]
+      data['io']['sda4'] = [iolist[0], iolist[1]]
+      data['io']['sdb1'] = [iolist[2], iolist[3]]
     #for entry in iostat:
     #  data['io'][entry[0]] = entry[1:]
 
