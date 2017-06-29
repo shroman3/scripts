@@ -49,6 +49,8 @@ import xml.etree.ElementTree
 #     else:
 #         raise CalledProcessError(exitCode, cmd_list)
 
+
+   
 def run_command(command):
     try:
         print check_output(command, shell=True)
@@ -84,7 +86,7 @@ class ParallelPlatform:
         
         self.servers = {}
         # choose servers, must be ordered
-        if (len(sys.argv) != 8):
+        if (len(sys.argv) != 9):
             print "Please call the parallel platform in the following manner:"
             print "parallel_platform.py exp codec k r z random_name random_key"
             exit(0)
@@ -98,11 +100,19 @@ class ParallelPlatform:
         self.k = sys.argv[3]
         self.r = sys.argv[4]
         self.z = sys.argv[5]
-#         self.n = self.k + self.r + self.z;
         self.random_name = sys.argv[6]
         self.random_key = sys.argv[7]
         self.is_write = (self.exp.startswith('w') or self.exp.startswith('W') or self.exp.startswith('e') or self.exp.startswith('E'))
-        self.start_servers = not (self.exp.startswith('e') or self.exp.startswith('E'))
+        self.start_local_servers = int(sys.argv[8])
+        if (self.start_local_servers):
+            self.start_servers = False
+        else:
+            self.start_servers = not (self.exp.startswith('e') or self.exp.startswith('E'))
+            if self.start_serevrs:
+                n = int(self.k) + int(self.r) + int(self.z)
+                if n >6:
+                    print "Please call the parallel platform with n<=6"
+                    exit(0)
 
     def parse_servers(self):
         run_command("rm servers.txt")
@@ -130,29 +140,40 @@ class ParallelPlatform:
         run_command("cp ../server/* /sraid/server/")
         run_command(run_permissions_command)
 
-        # servers clean up
-        if self.is_write :
-            print "deleting data:"
-            parallelssh("sudo -S rm -r /sraid/server/*")
-            parallelssh("sudo -S rm -r /sraid2/server/*")
-        else:
-            print "deleting jar and stats:"
-            parallelssh("sudo -S rm /sraid/server/stats.txt")
-            parallelssh("sudo -S rm /sraid/server/done")
-
-        parallelscp("../server/*", "/sraid/server/")
-        parallelscp("../server/server.jar", "/sraid2/server/")
-
-        parallelssh(run_permissions_command)
+        if (self.start_servers):
+            # servers clean up
+            if self.is_write :
+                print "deleting data:"
+                parallelssh("sudo -S rm -r /sraid/server/*")
+                parallelssh("sudo -S rm -r /sraid2/server/*")
+            else:
+                print "deleting jar and stats:"
+                parallelssh("sudo -S rm /sraid/server/stats.txt")
+                parallelssh("sudo -S rm /sraid/server/done")
+    
+            parallelscp("../server/*", "/sraid/server/")
+            parallelscp("../server/server.jar", "/sraid2/server/")
+    
+            parallelssh(run_permissions_command)
+        elif (self.start_local_servers):
+            for i in range(self.start_local_servers):
+                if self.is_write:
+                    run_command("rm -r /dev/shm/sraid/server" + str(i) + "/*")
+                run_command("cp ../server/* /dev/shm/sraid/server" + str(i))
         
     def start_serevrs(self):
         if (self.start_servers):
             print "STARTING SERVERS"
             parallelssh("sraid/scripts/startserver.sh")
+        elif (self.start_local_servers):
+            run_command("./startlocalserver.sh " + str(self.start_local_servers))
             
     def stop_serevrs(self):
-        print "STOPING SERVERS"
-        parallelssh("sraid/scripts/stopserver.sh")
+        if (self.start_servers):
+            print "STOPING SERVERS"
+            parallelssh("sraid/scripts/stopserver.sh")
+        elif (self.start_local_servers):
+            run_command("./stopserver.sh")
 
     def conduct_experiment(self):
         os.chdir("/sraid/client")
@@ -180,7 +201,8 @@ class ParallelPlatform:
         
         print "kill measurements by 'touch done'"
         touch_done_command = "touch /sraid/server/done"
-        parallelssh(touch_done_command)
+        if (self.start_servers):
+            parallelssh(touch_done_command)
         run_command(touch_done_command)
         # let clients finish
         print "sleep for 3 seconds for clienls -l ../resu    ts to finish"
@@ -213,16 +235,17 @@ class ParallelPlatform:
 
         # parse experiment results
         self.parse_results()
-        self.parse_logs()  
+        self.parse_logs()
 
         
     def copy_results_to_master(self):
         os.chdir(self.scriptsdir)
         print "copy stats to results folder"
-        for serv in self.servers:
-            run_command("sshpass -f p.txt scp " + serv + ":/sraid/server/stats.txt /sraid/results/" + serv + ".stat < p.txt")
-            run_command("sshpass -f p.txt scp " + serv + ":/sraid/server/logs/client_connection.log /sraid/results/log1_" + serv + ".log < p.txt")
-            run_command("sshpass -f p.txt scp " + serv + ":/sraid2/server/logs/client_connection.log /sraid/results/log2_" + serv + ".log < p.txt")
+        if (self.start_servers):
+            for serv in self.servers:
+                run_command("sshpass -f p.txt scp " + serv + ":/sraid/server/stats.txt /sraid/results/" + serv + ".stat < p.txt")
+                run_command("sshpass -f p.txt scp " + serv + ":/sraid/server/logs/client_connection.log /sraid/results/log1_" + serv + ".log < p.txt")
+                run_command("sshpass -f p.txt scp " + serv + ":/sraid2/server/logs/client_connection.log /sraid/results/log2_" + serv + ".log < p.txt")
             
         run_command("cp /sraid/client/logs/* /sraid/results/");
         run_command("cp /sraid/server/stats.txt /sraid/results/client.stat");
