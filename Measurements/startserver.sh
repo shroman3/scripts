@@ -10,9 +10,11 @@
 for i in `seq 1 $1`;
 do
 	for j in `seq 1 $2`;
+	do
 		#i=$(($j-1))
 		echo "Starting server 123$i$j"
         cd "/shroman/disk$i/sraid$j/server"
         nohup java -jar server.jar 123$i$j 123$i$j >/dev/null 2>&1 &
+    done
 done
 
