@@ -102,7 +102,7 @@ class ExperimentUtil:
  
   def handle_cpustat(self, data):
     # add "all" argument to get data of all cpus
-    os.chdir("/sraid/server")
+    os.chdir("/shroman/disk1/sraid1/server")
     cputot = check_output("sudo ./cpu_measure.sh", shell=True)
     # cpu_desc.write(strtimenow + "$" + ", ".join(map(str,parse_cpu(cputot)))
     # + "\n")
