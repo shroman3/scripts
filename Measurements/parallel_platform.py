@@ -10,7 +10,7 @@ from time import sleep
 import xml.etree.ElementTree
 
 import dateutil.parser
-
+from math import ceil
 
 # from fileinput import filename
 # list of functions:
@@ -91,7 +91,7 @@ class ParallelPlatform:
         # choose servers, must be ordered
         if (len(sys.argv) != 10):
             print "Please call the parallel platform in the following manner:"
-            print "parallel_platform.py exp codec k r z random_name random_key"
+            print "parallel_platform.py exp codec k r z random_name random_key servers_num step_size"
             exit(0)
         # parse arguments:
         self.parse_arguments()
@@ -108,7 +108,9 @@ class ParallelPlatform:
         self.random_key = sys.argv[7]
         self.is_write = (self.exp.startswith('w') or self.exp.startswith('W') or self.exp.startswith('e') or self.exp.startswith('E'))
         self.servers_num = int(sys.argv[8])
-        self.step_size = int(sys.argv[9])
+        if (self.servers_num < self.n):
+            self.servers_num = self.n
+        self.step_size = sys.argv[9]
         self.start_servers = not (self.exp.startswith('e') or self.exp.startswith('E'))
 
 
@@ -159,7 +161,8 @@ class ParallelPlatform:
     def start_serevrs(self):
         if (self.start_servers):
             print "STARTING SERVERS"
-            parallelssh("sraid/scripts/startserver.sh")
+            serv = int(ceil(self.servers_num/4))
+            parallelssh("sraid/scripts/startserver.sh 4 " + str(serv))
 #         elif (self.servers_num):
 #             run_command("./startlocalserver.sh " + str(self.servers_num))
             
@@ -167,8 +170,8 @@ class ParallelPlatform:
         if (self.start_servers):
             print "STOPING SERVERS"
             parallelssh("sraid/scripts/stopserver.sh")
-        elif (self.servers_num):
-            run_command("./stopserver.sh")
+#         elif (self.servers_num):
+#             run_command("./stopserver.sh")
 
     def conduct_experiment(self):
         os.chdir("/shroman/disk1/sraid1/client")
@@ -184,7 +187,7 @@ class ParallelPlatform:
             
             run_command("java -Xms2g -Xmx2g -jar client.jar " + self.exp + " " 
                         + self.codec + " " + self.k + " " + self.r + " " + self.z + " " 
-                        + self.random_name + " " + self.random_key + " " + self.servers_num + " " + self.step_size)
+                        + self.random_name + " " + self.random_key + " " + str(self.servers_num) + " " + self.step_size)
         except Exception, e:
             print "FAILED"
             print e
