@@ -4,7 +4,7 @@ from datetime import datetime  # , timedelta
 import json
 import os
 import re
-from subprocess import check_output, Popen, STDOUT, PIPE, CalledProcessError
+from subprocess import check_output#, Popen, STDOUT, PIPE, CalledProcessError
 import sys
 from time import sleep
 import xml.etree.ElementTree
@@ -48,27 +48,27 @@ from math import ceil
 #         return output
 #     else:
 #         raise CalledProcessError(exitCode, cmd_list)
-def run_command(command):
+def run_command(command, write=True):
     try:
         out = check_output(command, shell=True)
-        if out:
+        if write and out:
             print out
     except Exception as e:
         print e
         
-def parallelssh(command):
+def parallelssh(command, write=True):
     try:
         out = check_output("sshpass -f p.txt parallel-ssh -A -h ../servers.txt '" + command + "' < p.txt", shell=True)
-        if out:
+        if write and out:
             print out
     except Exception as e:
         print e
 
-def parallelscp(copy_from, copy_to):
+def parallelscp(copy_from, copy_to, write=False):
     try:
         out = check_output("sshpass -f p.txt parallel-scp -A -h ../servers.txt "
             + copy_from + " " + copy_to + " < p.txt", shell=True)
-        if out:
+        if write and out:
             print out
     except Exception, e:
         print e
@@ -135,6 +135,7 @@ class ParallelPlatform:
 
         # client clean up
         run_command("cp ../client/* /shroman/disk1/sraid1/client/")
+        run_command("cp ../server/* /shroman/disk1/sraid1/server/")
         run_command("sudo rm /shroman/disk1/sraid1/server/stats.txt")
         run_command("sudo rm /shroman/disk1/sraid1/server/done")
 
@@ -149,7 +150,9 @@ class ParallelPlatform:
                 parallelssh("sudo -S rm /shroman/disk1/sraid1/server/done")
     
             parallelscp("../server/*", "/shroman/disk1/sraid1/server/")
-            parallelscp("../server/server.jar", "/shroman/disk*/sraid*/server/server.jar")
+            for disk in range(1,5):
+                for i in range(1,9):
+                    parallelscp("../server/server.jar", "/shroman/disk" + str(disk) + "/sraid" + str(i) + "/server/server.jar")
     
             parallelssh(run_permissions_command)
 #         elif (self.servers_num):
@@ -161,7 +164,7 @@ class ParallelPlatform:
     def start_serevrs(self):
         if (self.start_servers):
             print "STARTING SERVERS"
-            serv = int(ceil(self.servers_num/4))
+            serv = int(ceil(float(self.servers_num)/(4*len(self.servers))))
             parallelssh("sraid/scripts/startserver.sh 4 " + str(serv))
 #         elif (self.servers_num):
 #             run_command("./startlocalserver.sh " + str(self.servers_num))
@@ -235,7 +238,8 @@ class ParallelPlatform:
 
         # parse experiment results
         self.parse_results()
-        self.parse_logs()
+        self.parse_network_logs()
+        self.parse_codec_logs()
 
         
     def copy_results_to_master(self):
@@ -244,12 +248,12 @@ class ParallelPlatform:
         if (self.start_servers):
             for serv in self.servers:
                 run_command("sshpass -f p.txt scp " + serv + ":/shroman/disk1/sraid1/server/stats.txt /shroman/results/" + serv + ".stat < p.txt")
-                for disk in range(1,4):
-                    for i in range(1,8):
+                for disk in range(1,5):
+                    for i in range(1,9):
                         for log in {"read", "write", "work"}:
                             run_command("sshpass -f p.txt scp " + serv + ":/shroman/disk" + str(disk) 
-                                    + "/sraid" + str(i) + "/logs/" + log + ".logn /shroman/results/" + log + "_" 
-                                    + serv + "_" + str(disk) + "_" + str(i) + ".logn < p.txt")
+                                    + "/sraid" + str(i) + "/server/logs/" + log + ".logn /shroman/results/" + log + "_" 
+                                    + serv + "_" + str(disk) + "_" + str(i) + ".logn < p.txt", False)
             
         run_command("cp /shroman/disk1/sraid1/client/logs/* /shroman/results/");
         run_command("cp /shroman/disk1/sraid1/server/stats.txt /sraid/results/client.stat");

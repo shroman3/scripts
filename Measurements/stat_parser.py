@@ -13,7 +13,7 @@ from subprocess import check_output
 
 # main 
 def main():
-  chdir("/sraid/server/")
+  chdir("/shroman/disk1/sraid1/server/")
   if len(sys.argv) < 2:
     timestart = datetime.utcnow()
     # print "Provide start time..."
