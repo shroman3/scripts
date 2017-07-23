@@ -4,13 +4,14 @@ from datetime import datetime  # , timedelta
 import json
 import os
 import re
-from subprocess import check_output#, Popen, STDOUT, PIPE, CalledProcessError
+from subprocess import check_output, STDOUT, Popen, PIPE, CalledProcessError
 import sys
 from time import sleep
 import xml.etree.ElementTree
 
 import dateutil.parser
 from math import ceil
+from platform import machine
 
 # from fileinput import filename
 # list of functions:
@@ -30,48 +31,52 @@ from math import ceil
 # parse_results() - parses the output files from each server to a proper csv
 #   named results.txt
 # write_measurement_row() - used to save redundant copy paste in parse_results
-# def call(cmd_list, prefix='', output=True):
-#     proc = Popen(cmd_list, stdout=PIPE, stderr=STDOUT)
-#     # Poll process for new output until finished
-#     while True:
-#         nextline = proc.stdout.readline()
-#         if nextline == '' and proc.poll() is not None:
-#             break
-#         if output:
-#             sys.stdout.write(prefix + nextline)
-#             sys.stdout.flush()
-#  
-#     output = proc.communicate()[0]
-#     exitCode = proc.returncode
-#  
-#     if (exitCode == 0):
-#         return output
-#     else:
-#         raise CalledProcessError(exitCode, cmd_list)
-def run_command(command, write=True):
+def call(cmd_list, prefix='', output=True):
+    proc = Popen(cmd_list, stdout=PIPE, stderr=STDOUT)
+    # Poll process for new output until finished
+    while True:
+        nextline = proc.stdout.readline()
+        if nextline == '' and proc.poll() is not None:
+            break
+        if output:
+            sys.stdout.write(prefix + nextline)
+            sys.stdout.flush()
+  
+    output = proc.communicate()[0]
+    exitCode = proc.returncode
+  
+    if (exitCode == 0):
+        return output
+    else:
+        raise CalledProcessError(exitCode, cmd_list)
+
+def run_command(command, write=False):
     try:
-        out = check_output(command, shell=True)
-        if write and out:
+        out = check_output(command, shell=True, stderr=STDOUT)
+        if (write and out):
             print out
     except Exception as e:
-        print e
+        if write: 
+            print e
         
-def parallelssh(command, write=True):
+def parallelssh(command, write=False):
     try:
         out = check_output("sshpass -f p.txt parallel-ssh -A -h ../servers.txt '" + command + "' < p.txt", shell=True)
-        if write and out:
+        if (write and out):
             print out
     except Exception as e:
-        print e
+        if write: 
+            print e
 
 def parallelscp(copy_from, copy_to, write=False):
     try:
         out = check_output("sshpass -f p.txt parallel-scp -A -h ../servers.txt "
             + copy_from + " " + copy_to + " < p.txt", shell=True)
-        if write and out:
+        if (write and out):
             print out
     except Exception, e:
-        print e
+        if write: 
+            print e
 """
 This class initiates a single experiment, outputting the results from
 self.servers to files $servername$.txt in the current dir of the script.
@@ -96,6 +101,9 @@ class ParallelPlatform:
         # parse arguments:
         self.parse_arguments()
         self.parse_servers()
+        self.servers_on_disk = int(ceil(float(self.servers_num) / (4 * len(self.servers))))
+#         print "each server will run " + str(self.servers_on_disk) + " daemons on every disk"
+
 
     def parse_arguments(self):
         self.exp = sys.argv[1]
@@ -138,23 +146,25 @@ class ParallelPlatform:
         run_command("cp ../server/* /shroman/disk1/sraid1/server/")
         run_command("sudo rm /shroman/disk1/sraid1/server/stats.txt")
         run_command("sudo rm /shroman/disk1/sraid1/server/done")
+        run_command("sudo echo 3 | sudo tee /proc/sys/vm/drop_caches && sudo sync")
 
         if (self.start_servers):
             # servers clean up
             if self.is_write :
                 print "deleting data:"
-                parallelssh("sudo -S rm -r /shroman/disk*/sraid*/server/*")
-            else:
-                print "deleting stats:"
-                parallelssh("sudo -S rm /shroman/disk1/sraid1/server/stats.txt")
-                parallelssh("sudo -S rm /shroman/disk1/sraid1/server/done")
-    
-            parallelscp("../server/*", "/shroman/disk1/sraid1/server/")
-            for disk in range(1,5):
-                for i in range(1,9):
-                    parallelscp("../server/server.jar", "/shroman/disk" + str(disk) + "/sraid" + str(i) + "/server/server.jar")
-    
+                parallelssh("sudo -S rm -r /shroman/disk*/sraid*/server/123*")
+                parallelssh("sudo -S rm -r /shroman/disk*/sraid*/server/logs")
+                parallelscp("../server/*", "/shroman/disk1/sraid1/server/")
+#                 for disk in range(1, 5):
+#                     for i in range(1, self.servers_on_disk + 1):
+# #                         print "copy server to disk " + str(disk) + " folder " + str(i)
+#                         parallelscp("../server/server.jar", "/shroman/disk" + str(disk) + "/sraid" + str(i) + "/server/server.jar")
+            print "deleting stats:"
+            parallelssh("sudo -S rm /shroman/disk1/sraid1/server/stats.txt")
+            parallelssh("sudo -S rm /shroman/disk1/sraid1/server/done")
+            
             parallelssh(run_permissions_command)
+            parallelssh("sudo -S echo 3 | sudo -S tee /proc/sys/vm/drop_caches && sudo -S sync")
 #         elif (self.servers_num):
 #             for i in range(self.servers_num):
 #                 if self.is_write:
@@ -164,8 +174,7 @@ class ParallelPlatform:
     def start_serevrs(self):
         if (self.start_servers):
             print "STARTING SERVERS"
-            serv = int(ceil(float(self.servers_num)/(4*len(self.servers))))
-            parallelssh("sraid/scripts/startserver.sh 4 " + str(serv))
+            parallelssh("sraid/scripts/startserver.sh 4 " + str(self.servers_on_disk))
 #         elif (self.servers_num):
 #             run_command("./startlocalserver.sh " + str(self.servers_num))
             
@@ -188,9 +197,11 @@ class ParallelPlatform:
             print self.exp + " " + self.codec + " experiment started at:",
             print self.experiment_start
             
-            run_command("java -Xms2g -Xmx2g -jar client.jar " + self.exp + " " 
-                        + self.codec + " " + self.k + " " + self.r + " " + self.z + " " 
-                        + self.random_name + " " + self.random_key + " " + str(self.servers_num) + " " + self.step_size)
+#             run_command("java -Xms2g -Xmx2g -jar client.jar " + self.exp + " " 
+#                         + self.codec + " " + self.k + " " + self.r + " " + self.z + " " 
+#                         + self.random_name + " " + self.random_key + " " + str(self.servers_num) + " " + self.step_size, True)
+            call(["java", "-Xms4g", "-Xmx4g", "-jar", "client.jar", self.exp, self.codec, self.k, self.r, self.z, self.random_name, self.random_key, str(self.servers_num), self.step_size])
+            # "-Djava.security.egd=file:/dev/./urandom"
         except Exception, e:
             print "FAILED"
             print e
@@ -248,15 +259,15 @@ class ParallelPlatform:
         if (self.start_servers):
             for serv in self.servers:
                 run_command("sshpass -f p.txt scp " + serv + ":/shroman/disk1/sraid1/server/stats.txt /shroman/results/" + serv + ".stat < p.txt")
-                for disk in range(1,5):
-                    for i in range(1,9):
-                        for log in {"read", "write", "work"}:
+                for disk in range(1, 5):
+                    for i in range(1, self.servers_on_disk):
+                        for log in {"IO", "transmit", "recieve"}:
                             run_command("sshpass -f p.txt scp " + serv + ":/shroman/disk" + str(disk) 
                                     + "/sraid" + str(i) + "/server/logs/" + log + ".logn /shroman/results/" + log + "_" 
-                                    + serv + "_" + str(disk) + "_" + str(i) + ".logn < p.txt", False)
+                                    + serv + "_" + str(disk) + "_" + str(i) + ".logn < p.txt")
             
         run_command("cp /shroman/disk1/sraid1/client/logs/* /shroman/results/");
-        run_command("cp /shroman/disk1/sraid1/server/stats.txt /sraid/results/client.stat");
+        run_command("cp /shroman/disk1/sraid1/server/stats.txt /shroman/results/client.stat");
 
     def parse_results(self):
         print "parsing results..."
@@ -267,7 +278,7 @@ class ParallelPlatform:
         
         files = [f for f in os.listdir('.') if (os.path.isfile(f) and f.endswith(".stat"))]
         for file in files:
-            print file
+#             print file
             serv = file.split('.')[0]
             with open(file, "r") as f:
                 data = json.load(f)
@@ -329,23 +340,32 @@ class ParallelPlatform:
         os.chdir(self.resultsdir)
         output = open("network.csv", "a")
         csvwriter = csv.writer(output)
-        csvwriter.writerow(['exp', 'codec', 'random', 'k', 'r', 'z', 'n', 'log_type', 'time', 'tag', 'size', 'serverid'])
+        csvwriter.writerow(['exp', 'codec', 'random', 'k', 'r', 'z', 'servers_num', 'time', 'tag', 'size', 'server_id', 'log_type', 'machine', 'disk', 'process_id'])
         
         files = [f for f in os.listdir('.') if (os.path.isfile(f) and f.endswith(".logn"))]
         for file in files:
-            print file
+#             print file
             log_type = file.split('.')[0]
             with open(file, "r") as f:
                 for line in f:
                     try:
                         split = re.compile("\]*[\s\w,-:]*\[+").split(line)
-                        self.write_logs_row(csvwriter, log_type, split[2], split[3], split[4])
+                        self.write_network_logs_row(csvwriter, log_type, split[2], split[3], split[4])
                     except Exception, e:
                         print e
                         print line
 
         output.close()
 
+    def write_network_logs_row(self, csvwriter, log_type, time, tag, size):
+        # ['experiment', 'log_type', 'time', 'tag', 'size'])
+        size = size.split(']')[0]
+        split = log_type.split('_')
+        if (len(split) == 1):
+            split.append('client')
+        csvrow = [self.exp, self.codec, self.random_name, self.k, self.r, self.z, self.servers_num, time, tag] + size.split(',') + split;
+        csvwriter.writerow(csvrow)
+        
     def parse_codec_logs(self):
         print "parsing codec logs..."
         os.chdir(self.resultsdir)
@@ -355,19 +375,20 @@ class ParallelPlatform:
         
         files = [f for f in os.listdir('.') if (os.path.isfile(f) and f.endswith(".logc"))]
         for file in files:
-            print file
+#             print file
             log_type = file.split('.')[0]
             with open(file, "r") as f:
                 for line in f:
                     try:
                         split = re.compile("\]*[\s\w,-:]*\[+").split(line)
-                        self.write_logs_row(csvwriter, log_type, split[2], split[3], split[4])
+                        self.write_codec_logs_row(csvwriter, log_type, split[2], split[3], split[4])
                     except Exception, e:
                         print e
                         print line
 
         output.close()
-    def write_logs_row(self, csvwriter, log_type, time, tag, size):
+
+    def write_codec_logs_row(self, csvwriter, log_type, time, tag, size):
         # ['experiment', 'log_type', 'time', 'tag', 'size'])
         size = size.split(']')[0]
         csvrow = [self.exp, self.codec, self.random_name, self.k, self.r, self.z, self.servers_num, log_type, time, tag] + size.split(',');
