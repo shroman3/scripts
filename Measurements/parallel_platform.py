@@ -11,7 +11,7 @@ import xml.etree.ElementTree
 
 import dateutil.parser
 from math import ceil
-from platform import machine
+
 
 # from fileinput import filename
 # list of functions:
@@ -200,7 +200,7 @@ class ParallelPlatform:
 #             run_command("java -Xms2g -Xmx2g -jar client.jar " + self.exp + " " 
 #                         + self.codec + " " + self.k + " " + self.r + " " + self.z + " " 
 #                         + self.random_name + " " + self.random_key + " " + str(self.servers_num) + " " + self.step_size, True)
-            call(["java", "-Xms4g", "-Xmx4g", "-jar", "client.jar", self.exp, self.codec, self.k, self.r, self.z, self.random_name, self.random_key, str(self.servers_num), self.step_size])
+            call(["java", "-Xms6g", "-Xmx6g", "-jar", "client.jar", self.exp, self.codec, self.k, self.r, self.z, self.random_name, self.random_key, str(self.servers_num), self.step_size])
             # "-Djava.security.egd=file:/dev/./urandom"
         except Exception, e:
             print "FAILED"
@@ -249,8 +249,10 @@ class ParallelPlatform:
 
         # parse experiment results
         self.parse_results()
-        self.parse_network_logs()
         self.parse_codec_logs()
+        self.parse_network_logs("io", ".logsio")
+        self.parse_network_logs("server_network", ".logsn")
+        self.parse_network_logs("client_network", ".logcn")
 
         
     def copy_results_to_master(self):
@@ -261,10 +263,13 @@ class ParallelPlatform:
                 run_command("sshpass -f p.txt scp " + serv + ":/shroman/disk1/sraid1/server/stats.txt /shroman/results/" + serv + ".stat < p.txt")
                 for disk in range(1, 5):
                     for i in range(1, self.servers_on_disk):
-                        for log in {"IO", "transmit", "recieve"}:
+                        run_command("sshpass -f p.txt scp " + serv + ":/shroman/disk" + str(disk) 
+                                    + "/sraid" + str(i) + "/server/logs/IO.logsio /shroman/results/IO_" 
+                                    + serv + "_" + str(disk) + "_" + str(i) + ".logsio < p.txt")
+                        for log in {"transmit", "recieve"}:
                             run_command("sshpass -f p.txt scp " + serv + ":/shroman/disk" + str(disk) 
-                                    + "/sraid" + str(i) + "/server/logs/" + log + ".logn /shroman/results/" + log + "_" 
-                                    + serv + "_" + str(disk) + "_" + str(i) + ".logn < p.txt")
+                                    + "/sraid" + str(i) + "/server/logs/" + log + ".logsn /shroman/results/" + log + "_" 
+                                    + serv + "_" + str(disk) + "_" + str(i) + ".logsn < p.txt")
             
         run_command("cp /shroman/disk1/sraid1/client/logs/* /shroman/results/");
         run_command("cp /shroman/disk1/sraid1/server/stats.txt /shroman/results/client.stat");
@@ -335,14 +340,14 @@ class ParallelPlatform:
 #             csvwriter.writerow(csvrow2)
 #         else:  # all other cases, 1 entry per call
 #             csvwriter.writerow(csvrow)
-    def parse_network_logs(self):
-        print "parsing network logs..."
+    def parse_network_logs(self, name, extension):
+        print "parsing " + name + " logs..."
         os.chdir(self.resultsdir)
-        output = open("network.csv", "a")
+        output = open(name + ".csv", "a")
         csvwriter = csv.writer(output)
         csvwriter.writerow(['exp', 'codec', 'random', 'k', 'r', 'z', 'servers_num', 'time', 'tag', 'size', 'server_id', 'log_type', 'machine', 'disk', 'process_id'])
         
-        files = [f for f in os.listdir('.') if (os.path.isfile(f) and f.endswith(".logn"))]
+        files = [f for f in os.listdir('.') if (os.path.isfile(f) and f.endswith(extension))]
         for file in files:
 #             print file
             log_type = file.split('.')[0]
