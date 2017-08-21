@@ -55,6 +55,10 @@ class ExperimentUtil:
       return []
 
   def parse_io(self, iostat):
+    brd2 = 0
+    bwr2 = 0
+    brd1 = 0
+    bwr1 = 0
     for line in iostat.splitlines():
       line = line.split()
       if line[2] == "sda4":
