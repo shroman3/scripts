@@ -94,9 +94,9 @@ class ParallelPlatform:
         
         self.servers = {}
         # choose servers, must be ordered
-        if (len(sys.argv) != 10):
+        if (len(sys.argv) != 9):
             print "Please call the parallel platform in the following manner:"
-            print "parallel_platform.py exp codec k r z random_name random_key servers_num step_size"
+            print "parallel_platform.py exp codec k r z random_name servers_num step_size"
             exit(0)
         # parse arguments:
         self.parse_arguments()
@@ -113,12 +113,11 @@ class ParallelPlatform:
         self.z = sys.argv[5]
         self.n = int(self.k) + int(self.r) + int(self.z)
         self.random_name = sys.argv[6]
-        self.random_key = sys.argv[7]
         self.is_write = (self.exp.startswith('w') or self.exp.startswith('W') or self.exp.startswith('e') or self.exp.startswith('E'))
-        self.servers_num = int(sys.argv[8])
+        self.servers_num = int(sys.argv[7])
         if (self.servers_num < self.n):
             self.servers_num = self.n
-        self.step_size = sys.argv[9]
+        self.step_size = sys.argv[8]
         self.start_servers = not (self.exp.startswith('e') or self.exp.startswith('E'))
 
 
@@ -142,8 +141,8 @@ class ParallelPlatform:
         run_permissions_command = "chmod +x /shroman/disk1/sraid1/server/*.sh /shroman/disk1/sraid1/server/*.py"
 
         # client clean up
-        run_command("cp ../client/* /shroman/disk1/sraid1/client/")
-        run_command("cp ../server/* /shroman/disk1/sraid1/server/")
+#         run_command("cp ../client/* /shroman/disk1/sraid1/client/")
+#         run_command("cp ../server/* /shroman/disk1/sraid1/server/")
         run_command("sudo rm /shroman/disk1/sraid1/server/stats.txt")
         run_command("sudo rm /shroman/disk1/sraid1/server/done")
         run_command("sudo echo 3 | sudo tee /proc/sys/vm/drop_caches && sudo sync")
@@ -199,8 +198,8 @@ class ParallelPlatform:
             
 #             run_command("java -Xms2g -Xmx2g -jar client.jar " + self.exp + " " 
 #                         + self.codec + " " + self.k + " " + self.r + " " + self.z + " " 
-#                         + self.random_name + " " + self.random_key + " " + str(self.servers_num) + " " + self.step_size, True)
-            call(["java", "-Xms6g", "-Xmx6g", "-jar", "client.jar", self.exp, self.codec, self.k, self.r, self.z, self.random_name, self.random_key, str(self.servers_num), self.step_size])
+#                         + self.random_name + " " + str(self.servers_num) + " " + self.step_size, True)
+            call(["java", "-Xms6g", "-Xmx6g", "-jar", "client.jar", self.exp, self.codec, self.k, self.r, self.z, self.random_name, str(self.servers_num), self.step_size])
             # "-Djava.security.egd=file:/dev/./urandom"
         except Exception, e:
             print "FAILED"
