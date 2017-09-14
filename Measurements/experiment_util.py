@@ -118,10 +118,18 @@ class ExperimentUtil:
 	def handle_netstat(self, net_inst, data):
 		# use /proc/net/dev, lo and eno1 are the used interfaces
 		net_inst.update()
-		diffdata = (int(net_inst['eno1']['receive']['bytes']),
-						int(net_inst['eno1']['transmit']['bytes']),
-						int(net_inst['lo']['receive']['bytes']),
-						int(net_inst['lo']['transmit']['bytes']))
+		try:
+			interface_name = 'lo'
+			if 'enp6s0f0' in net_inst:
+				interface_name = 'enp6s0f0'
+			elif 'enp5s0f0' in net_inst:
+				interface_name = 'enp5s0f0' 
+			diffdata = (int(net_inst[interface_name]['receive']['bytes']),
+							int(net_inst[interface_name]['transmit']['bytes']),
+							int(net_inst['lo']['receive']['bytes']),
+							int(net_inst['lo']['transmit']['bytes']))
+		except Exception:
+			diffdata = (-1,-1,-1,-1)
 		if len(self.prev_net_diffdata) > 0:
 			data["net"] = tuple(numpy.subtract(diffdata, self.prev_net_diffdata))
 		self.prev_net_diffdata = diffdata
